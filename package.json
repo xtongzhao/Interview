@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "fix:dev": "./fix-nextjs-dev.sh",
+    "dev:clean": "./fix-nextjs-dev.sh && npm run dev"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

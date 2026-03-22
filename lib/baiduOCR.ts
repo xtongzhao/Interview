@@ -14,8 +14,21 @@ interface BaiduOCRTokenResponse {
   error_description?: string;
 }
 
+interface BaiduOCRLocation {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 interface BaiduOCRWord {
   words: string;
+  location?: BaiduOCRLocation;
+  probability?: {
+    average: number;
+  };
+  // 索引签名，允许字符串索引访问
+  [key: string]: any;
 }
 
 interface BaiduOCRWordsResult {
@@ -23,6 +36,20 @@ interface BaiduOCRWordsResult {
   words_result_num: number;
   log_id: string;
   direction?: number;
+  error_code?: number;
+  error_msg?: string;
+  probability?: {
+    average: number;
+  };
+  // 索引签名，允许字符串索引访问
+  [key: string]: any;
+}
+
+// 错误响应接口
+interface BaiduOCRErrorResponse {
+  error_code: number;
+  error_msg: string;
+  [key: string]: any; // 允许其他属性
 }
 
 // 百度OCR服务实现
@@ -157,16 +184,18 @@ export class BaiduOCRService implements OCRService {
       throw new Error(`OCR API请求失败: ${response.status} ${response.statusText}`);
     }
 
-    const data: BaiduOCRWordsResult = await response.json();
+    const data: any = await response.json();
 
-    // 检查错误
-    if (data['error_code']) {
-      const errorCode = data['error_code'];
-      const errorMsg = data['error_msg'] || '未知错误';
+    // 检查错误 - 兼容点号和方括号访问
+    if (data.error_code || data['error_code']) {
+      const errorCode = data.error_code || data['error_code'];
+      const errorMsg = data.error_msg || data['error_msg'] || '未知错误';
       throw new Error(`百度OCR错误 ${errorCode}: ${errorMsg}`);
     }
 
-    return data;
+    // 类型断言为成功响应
+    const result = data as BaiduOCRWordsResult;
+    return result;
   }
 
   /**
@@ -184,8 +213,9 @@ export class BaiduOCRService implements OCRService {
 
     // 计算平均置信度（如果有概率信息）
     let confidence = 0.8; // 默认置信度
-    if (baiduResult['probability'] && baiduResult['probability'].average) {
-      confidence = baiduResult['probability'].average;
+    if ((baiduResult.probability && baiduResult.probability.average) ||
+        (baiduResult['probability'] && baiduResult['probability'].average)) {
+      confidence = baiduResult.probability?.average || baiduResult['probability']?.average || 0.8;
     }
 
     // 转换为文本块
@@ -196,8 +226,8 @@ export class BaiduOCRService implements OCRService {
       };
 
       // 如果有位置信息（百度高精度版可能返回）
-      if (item['location']) {
-        const location = item['location'];
+      if (item.location) {
+        const location = item.location;
         block.boundingBox = {
           x: location.left || 0,
           y: location.top || 0,
