@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "./clean-port.sh",
     "dev": "next dev",
+    "dev:safe": "./clean-port.sh && next dev",
     "build": "next build",
     "start": "next start",
     "fix:dev": "./fix-nextjs-dev.sh",
-    "dev:clean": "./fix-nextjs-dev.sh && npm run dev"
+    "dev:clean": "./fix-nextjs-dev.sh && npm run dev",
+    "clean:ports": "./clean-port.sh"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

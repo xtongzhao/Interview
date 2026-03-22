@@ -28,6 +28,13 @@ export class ResourceProcessor {
   }
 
   /**
+   * 清理文本：去掉换行符，合并多个空格
+   */
+  private cleanText(text: string): string {
+    return text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  /**
    * 处理面试资源（PDF、图片、文本等）
    */
   async processResource(resource: InterviewResource, file?: File): Promise<ProcessResult> {
@@ -103,7 +110,7 @@ export class ResourceProcessor {
 
     // 使用现有的简历解析器
     const resumeData = await parseResume(file);
-    const extractedText = resumeData.rawText;
+    const extractedText = this.cleanText(resumeData.rawText);
 
     // 将简历内容分类为知识块
     const resumeChunks = categorizeResumeContent(resumeData);
@@ -111,7 +118,7 @@ export class ResourceProcessor {
     // 转换为向量存储块
     const chunks: SimpleChunk[] = await Promise.all(
       resumeChunks.map(async (chunk) => {
-        return this.vectorStore.storeContent(chunk.text, {
+        return this.vectorStore.storeContent(this.cleanText(chunk.text), {
           category: chunk.category,
           metadata: {
             source: 'resume',
@@ -148,7 +155,7 @@ export class ResourceProcessor {
           language: 'zh',
         });
 
-        extractedText = ocrResult.text;
+        extractedText = this.cleanText(ocrResult.text);
         console.log(`OCR识别完成: ${extractedText.length}字符，置信度: ${ocrResult.confidence}`);
 
         // 存储图片的base64预览（用于显示）
@@ -165,7 +172,7 @@ export class ResourceProcessor {
       } catch (error) {
         console.error('OCR识别失败:', error);
         // OCR失败时使用占位符
-        extractedText = `[图片OCR识别失败: ${file.name}]`;
+        extractedText = this.cleanText(`[图片OCR识别失败: ${file.name}]`);
 
         // 存储图片的base64预览
         const base64Preview = await this.fileToBase64(file);
@@ -179,12 +186,12 @@ export class ResourceProcessor {
       }
     } else if (resource.rawContent && resource.rawContent.startsWith('data:image')) {
       // 如果已经有base64图片内容，但无法进行OCR（需要File对象）
-      extractedText = `[已有图片内容，但需要重新上传以进行OCR]`;
+      extractedText = this.cleanText(`[已有图片内容，但需要重新上传以进行OCR]`);
     }
 
     // 如果没有提取到有效文本，使用标题作为内容
-    if (!extractedText || extractedText.includes('[图片') || extractedText.trim().length < 10) {
-      extractedText = resource.title;
+    if (!extractedText || extractedText.includes('[图片') || extractedText.includes('[OCR placeholder') || extractedText.includes('[已有图片内容') || extractedText.trim().length < 10) {
+      extractedText = this.cleanText(resource.title);
     }
 
     // 创建知识块
@@ -247,11 +254,19 @@ export class ResourceProcessor {
       extractedText = resource.title;
     }
 
-    // 分割文本为段落
+    // 分割文本为段落，并清理每个段落内的换行符
     const paragraphs = extractedText
       .split(/\n\n+/)
-      .map(p => p.trim())
+      .map(p => this.cleanText(p.trim()))
       .filter(p => p.length > 0);
+
+    // 如果没有段落（文本中没有双换行符），将整个清理后的文本作为一个段落
+    if (paragraphs.length === 0) {
+      paragraphs.push(this.cleanText(extractedText));
+    }
+
+    // 更新提取的文本为清理后的段落连接
+    extractedText = paragraphs.join(' ');
 
     // 为每个段落创建知识块
     const chunks: SimpleChunk[] = [];
@@ -287,16 +302,48 @@ export class ResourceProcessor {
 
   /**
    * 辅助方法：文件转base64
+   * 兼容浏览器和Node.js环境
    */
   private async fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve(reader.result as string);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    // 检查是否在浏览器环境
+    if (typeof window !== 'undefined' && typeof FileReader !== 'undefined') {
+      // 浏览器环境：使用FileReader
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          resolve(reader.result as string);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    } else {
+      // Node.js/服务器环境：使用Buffer
+      try {
+        // 首先尝试使用file.arrayBuffer()（现代API）
+        if (file.arrayBuffer && typeof file.arrayBuffer === 'function') {
+          const arrayBuffer = await file.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const base64 = buffer.toString('base64');
+          const mimeType = file.type || 'application/octet-stream';
+          return `data:${mimeType};base64,${base64}`;
+        }
+
+        // 备用方法：如果file有buffer属性
+        if ((file as any).buffer) {
+          const buffer = Buffer.from((file as any).buffer);
+          const base64 = buffer.toString('base64');
+          const mimeType = file.type || 'application/octet-stream';
+          return `data:${mimeType};base64,${base64}`;
+        }
+
+        // 如果都没有，尝试其他方法
+        console.warn('无法将文件转换为base64，使用回退方法');
+        throw new Error('无法处理文件：缺少arrayBuffer方法');
+      } catch (error) {
+        console.error('文件转base64失败:', error);
+        throw new Error(`文件转换失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
   }
 
   /**
@@ -394,6 +441,77 @@ export class ResourceProcessor {
 
     console.log(`Cleared ${deletedCount} chunks for resource ${resourceId}`);
     return deletedCount;
+  }
+
+  /**
+   * 更新资源文本内容并重新生成知识块
+   * @param resourceId 资源ID
+   * @param newContent 新的文本内容
+   * @param options 可选参数，包含资源类型和元数据
+   * @returns 新创建的知识块数量
+   */
+  async updateResourceText(
+    resourceId: string,
+    newContent: string,
+    options?: {
+      resourceType?: ResourceType;
+      metadata?: Record<string, any>;
+    }
+  ): Promise<{
+    success: boolean;
+    chunks: SimpleChunk[];
+    deletedCount: number;
+    error?: string;
+  }> {
+    try {
+      console.log(`Updating resource text for ${resourceId}`);
+
+      // 1. 清除旧的资源块
+      const deletedCount = await this.clearResourceChunks(resourceId);
+      console.log(`Cleared ${deletedCount} old chunks for resource ${resourceId}`);
+
+      // 2. 分割新内容并创建新块，清理换行符
+      // 按段落分割（简单分割逻辑）
+      const paragraphs = newContent
+        .split(/\n\n+/)
+        .map(p => this.cleanText(p.trim()))
+        .filter(p => p.length > 0);
+
+      // 如果没有段落，将整个清理后的内容作为一个段落
+      const textSegments = paragraphs.length > 0 ? paragraphs : [this.cleanText(newContent)];
+
+      // 3. 为每个段落创建知识块
+      const chunks: SimpleChunk[] = [];
+      for (const segment of textSegments) {
+        const category = classifyByKeywords(segment);
+        const chunk = await this.vectorStore.storeContent(segment, {
+          category,
+          metadata: {
+            source: 'updated',
+            resourceId: resourceId,
+            type: options?.resourceType,
+            ...(options?.metadata || {}),
+          },
+        });
+        chunks.push(chunk);
+      }
+
+      console.log(`Created ${chunks.length} new chunks for resource ${resourceId}`);
+      return {
+        success: true,
+        chunks,
+        deletedCount,
+      };
+
+    } catch (error) {
+      console.error(`Error updating resource text for ${resourceId}:`, error);
+      return {
+        success: false,
+        chunks: [],
+        deletedCount: 0,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
   }
 }
 

@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, Video, Pause, Play, SkipForward, Volume2, Settings, Clock, CheckCircle, SkipBack, FastForward, Rewind, AlertCircle } from "lucide-react";
-import { useState, useEffect } from "react";
-import { useInterview } from "@/hooks/useInterview";
+import { Input } from "@/components/ui/input";
+import { Mic, Video, Pause, Play, SkipForward, Volume2, Settings, Clock, CheckCircle, SkipBack, FastForward, Rewind, AlertCircle, Brain, Loader2, Download } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { useInterview, type InterviewQuestion } from "@/hooks/useInterview";
 
 export default function InterviewPage() {
   const {
     state,
+    videoStream,
     currentQuestion,
     progress,
     timeLeft,
@@ -28,11 +30,41 @@ export default function InterviewPage() {
     skipQuestion,
     updateSettings,
     resetInterview,
+    generateQuestionsFromKnowledgeBase,
+    loadQuestions,
+    downloadQuestionsAsMarkdown,
   } = useInterview();
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && videoStream) {
+      videoRef.current.srcObject = videoStream;
+    }
+  }, [videoStream]);
 
   const [answerText, setAnswerText] = useState('');
   const [volume, setVolume] = useState([80]);
   const [showTimeWarning, setShowTimeWarning] = useState(false);
+  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+
+  // 内联编辑状态
+  const [editingTimeLimit, setEditingTimeLimit] = useState(false);
+  const [tempTimeLimit, setTempTimeLimit] = useState(state.settings.timeLimitPerQuestion / 60); // 分钟
+  const [editingDuration, setEditingDuration] = useState(false);
+  const [tempDuration, setTempDuration] = useState(state.settings.duration);
+  const [editingPrompt, setEditingPrompt] = useState(false);
+  const [tempPrompt, setTempPrompt] = useState(state.settings.prompt || '');
+  const [editingJobDescription, setEditingJobDescription] = useState(false);
+  const [tempJobDescription, setTempJobDescription] = useState(state.settings.jobDescription || '');
+
+  // 同步设置状态到临时值
+  useEffect(() => {
+    setTempTimeLimit(state.settings.timeLimitPerQuestion / 60);
+    setTempDuration(state.settings.duration);
+    setTempPrompt(state.settings.prompt || '');
+    setTempJobDescription(state.settings.jobDescription || '');
+  }, [state.settings.timeLimitPerQuestion, state.settings.duration, state.settings.prompt, state.settings.jobDescription]);
 
   // Load sample questions on first load if no questions are loaded
   useEffect(() => {
@@ -58,9 +90,9 @@ export default function InterviewPage() {
     }
   }, [questionTimeLeft, state.isInterviewActive, state.isPaused]);
 
-  const handleSubmitAnswer = () => {
+  const handleSubmitAnswer = async () => {
     if (answerText.trim() && currentQuestion) {
-      answerCurrentQuestion(answerText);
+      await answerCurrentQuestion(answerText);
       setAnswerText('');
       // Auto-advance after answering (optional)
       // setTimeout(() => nextQuestion(), 2000);
@@ -114,22 +146,31 @@ export default function InterviewPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="aspect-video bg-black rounded-lg flex items-center justify-center relative">
-              {/* Video feed placeholder */}
-              <div className="text-center">
-                <Video className="h-16 w-16 mx-auto text-gray-400" />
-                <p className="mt-2 text-gray-400">
-                  {state.isInterviewActive ? '摄像头画面活跃中' : '摄像头画面将在此显示'}
-                </p>
-                {!state.isInterviewActive ? (
-                  <Button className="mt-4" onClick={startInterview} disabled={state.questions.length === 0}>
-                    开始面试
-                  </Button>
-                ) : (
-                  <Button className="mt-4" onClick={handleStartStopRecording}>
-                    {state.isRecording ? '停止录制' : '开始录制'}
-                  </Button>
-                )}
-              </div>
+              {videoStream ? (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover rounded-lg"
+                />
+              ) : (
+                <div className="text-center">
+                  <Video className="h-16 w-16 mx-auto text-gray-400" />
+                  <p className="mt-2 text-gray-400">
+                    {state.isInterviewActive ? '摄像头画面活跃中' : '摄像头画面将在此显示'}
+                  </p>
+                  {!state.isInterviewActive ? (
+                    <Button className="mt-4" onClick={startInterview}>
+                      开始面试
+                    </Button>
+                  ) : (
+                    <Button className="mt-4" onClick={handleStartStopRecording}>
+                      {state.isRecording ? '停止录制' : '开始录制'}
+                    </Button>
+                  )}
+                </div>
+              )}
               {state.isRecording && (
                 <div className="absolute top-4 left-4 flex items-center gap-2">
                   <div className="h-3 w-3 bg-red-500 rounded-full animate-pulse"></div>
@@ -284,43 +325,125 @@ export default function InterviewPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span>面试官语气</span>
-              <span className="font-medium capitalize">{state.settings.interviewerTone}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>问题节奏</span>
-              <span className="font-medium capitalize">{state.settings.questionPace}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>跟进问题</span>
-              <span className="font-medium">{state.settings.followUpQuestions ? 'Enabled' : 'Disabled'}</span>
-            </div>
+            {/* 每个问题时间限制 */}
             <div className="flex items-center justify-between">
               <span>每个问题时间限制</span>
-              <span className="font-medium">{state.settings.timeLimitPerQuestion / 60} minutes</span>
+              {editingTimeLimit ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    value={tempTimeLimit}
+                    onChange={(e) => setTempTimeLimit(parseInt(e.target.value) || 0)}
+                    className="w-24"
+                    min="1"
+                    max="60"
+                  />
+                  <span className="text-sm">minutes</span>
+                  <Button size="sm" onClick={() => {
+                    updateSettings({ timeLimitPerQuestion: tempTimeLimit * 60 });
+                    setEditingTimeLimit(false);
+                  }}>保存</Button>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setTempTimeLimit(state.settings.timeLimitPerQuestion / 60);
+                    setEditingTimeLimit(false);
+                  }}>取消</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{state.settings.timeLimitPerQuestion / 60} minutes</span>
+                  <Button size="sm" variant="outline" onClick={() => setEditingTimeLimit(true)}>配置</Button>
+                </div>
+              )}
             </div>
+
+            {/* 总时长 */}
             <div className="flex items-center justify-between">
               <span>总时长</span>
-              <span className="font-medium">{state.settings.duration} minutes</span>
+              {editingDuration ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    value={tempDuration}
+                    onChange={(e) => setTempDuration(parseInt(e.target.value) || 0)}
+                    className="w-24"
+                    min="5"
+                    max="180"
+                  />
+                  <span className="text-sm">minutes</span>
+                  <Button size="sm" onClick={() => {
+                    updateSettings({ duration: tempDuration });
+                    setEditingDuration(false);
+                  }}>保存</Button>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setTempDuration(state.settings.duration);
+                    setEditingDuration(false);
+                  }}>取消</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{state.settings.duration} minutes</span>
+                  <Button size="sm" variant="outline" onClick={() => setEditingDuration(true)}>配置</Button>
+                </div>
+              )}
             </div>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                const tone = prompt('面试官语气（友好/专业/严格）:', state.settings.interviewerTone);
-                const pace = prompt('问题节奏（慢/适中/快）:', state.settings.questionPace);
-                const duration = prompt('总时长（分钟）:', state.settings.duration.toString());
-                const timeLimit = prompt('每个问题时间（秒）:', state.settings.timeLimitPerQuestion.toString());
 
-                if (tone) updateSettings({ interviewerTone: tone as any });
-                if (pace) updateSettings({ questionPace: pace as any });
-                if (duration) updateSettings({ duration: parseInt(duration) });
-                if (timeLimit) updateSettings({ timeLimitPerQuestion: parseInt(timeLimit) });
-              }}
-            >
-              调整设置
-            </Button>
+            {/* 系统提示词 */}
+            <div className="flex items-center justify-between">
+              <span>系统提示词</span>
+              {editingPrompt ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={tempPrompt}
+                    onChange={(e) => setTempPrompt(e.target.value)}
+                    className="w-48"
+                  />
+                  <Button size="sm" onClick={() => {
+                    updateSettings({ prompt: tempPrompt });
+                    setEditingPrompt(false);
+                  }}>保存</Button>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setTempPrompt(state.settings.prompt || '');
+                    setEditingPrompt(false);
+                  }}>取消</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-xs max-w-[200px] truncate" title={state.settings.prompt || ''}>
+                    {state.settings.prompt ? (state.settings.prompt.length > 30 ? `${state.settings.prompt.substring(0, 30)}...` : state.settings.prompt) : '未设置'}
+                  </span>
+                  <Button size="sm" variant="outline" onClick={() => setEditingPrompt(true)}>配置</Button>
+                </div>
+              )}
+            </div>
+
+            {/* 岗位JD */}
+            <div className="flex items-center justify-between">
+              <span>岗位JD</span>
+              {editingJobDescription ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={tempJobDescription}
+                    onChange={(e) => setTempJobDescription(e.target.value)}
+                    className="w-48"
+                  />
+                  <Button size="sm" onClick={() => {
+                    updateSettings({ jobDescription: tempJobDescription });
+                    setEditingJobDescription(false);
+                  }}>保存</Button>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setTempJobDescription(state.settings.jobDescription || '');
+                    setEditingJobDescription(false);
+                  }}>取消</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-xs max-w-[200px] truncate" title={state.settings.jobDescription}>
+                    {state.settings.jobDescription ? (state.settings.jobDescription.length > 30 ? `${state.settings.jobDescription.substring(0, 30)}...` : state.settings.jobDescription) : '未设置'}
+                  </span>
+                  <Button size="sm" variant="outline" onClick={() => setEditingJobDescription(true)}>配置</Button>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -347,7 +470,7 @@ export default function InterviewPage() {
                 if (currentQuestion) {
                   const newAnswer = prompt('编辑您的回答:', currentQuestion.answer || '');
                   if (newAnswer !== null) {
-                    answerCurrentQuestion(newAnswer);
+                    answerCurrentQuestion(newAnswer, false); // 编辑时不生成跟进问题
                   }
                 }
               }}
@@ -358,12 +481,64 @@ export default function InterviewPage() {
             <Button
               className="w-full"
               variant="outline"
+              onClick={async () => {
+                if (!state.settings.jobDescription.trim()) {
+                  alert('请先设置岗位JD，以便从知识库生成相关问题。');
+                  return;
+                }
+
+                if (confirm('将从知识库生成面试问题。这会替换当前的问题列表。是否继续？')) {
+                  setIsGeneratingQuestions(true);
+                  try {
+                    const questions = await generateQuestionsFromKnowledgeBase();
+                    if (questions.length > 0) {
+                      // 加载生成的问题
+                      loadQuestions(questions);
+                      alert(`已成功生成并加载 ${questions.length} 个问题。现在可以开始面试。`);
+                    } else {
+                      alert('未能从知识库生成问题。请确保知识库中有相关内容。');
+                    }
+                  } catch (error) {
+                    console.error('生成问题失败:', error);
+                    alert('生成问题失败，请检查网络连接或稍后重试。');
+                  } finally {
+                    setIsGeneratingQuestions(false);
+                  }
+                }
+              }}
+              disabled={isGeneratingQuestions}
+            >
+              {isGeneratingQuestions ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <Brain className="h-4 w-4 mr-2" />
+                  从知识库生成问题
+                </>
+              )}
+            </Button>
+            <Button
+              className="w-full"
+              variant="outline"
               onClick={() => {
-                const questions = JSON.parse(localStorage.getItem('generated-questions') || '[]');
-                if (questions.length > 0) {
-                  if (confirm(`加载 ${questions.length} 个生成的问题？`)) {
-                    // Note: In a real app, you would call loadQuestions here
-                    alert('问题加载功能将在此实现。');
+                const savedData = JSON.parse(localStorage.getItem('generated-questions') || '[]');
+                if (savedData.length > 0) {
+                  if (confirm(`加载 ${savedData.length} 个生成的问题？`)) {
+                    // 将生成的问题转换为InterviewQuestion格式
+                    const questions: InterviewQuestion[] = savedData.map((q: any, index: number) => ({
+                      id: q.id || `loaded-${Date.now()}-${index}`,
+                      text: q.text || q.question || '',
+                      category: q.category || 'general',
+                      answered: false,
+                      answer: undefined,
+                      startTime: undefined,
+                      endTime: undefined,
+                    }));
+                    loadQuestions(questions);
+                    alert(`已加载 ${questions.length} 个问题。`);
                   }
                 } else {
                   alert('未找到生成的问题。请先生成问题。');
@@ -371,6 +546,17 @@ export default function InterviewPage() {
               }}
             >
               加载生成的问题
+            </Button>
+            <Button
+              className="w-full"
+              variant="outline"
+              onClick={() => {
+                downloadQuestionsAsMarkdown();
+              }}
+              disabled={state.questions.length === 0}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              下载问题（Markdown）
             </Button>
             <Button
               className="w-full"

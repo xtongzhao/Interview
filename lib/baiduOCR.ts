@@ -208,8 +208,8 @@ export class BaiduOCRService implements OCRService {
     const processingTime = Date.now() - startTime;
     const wordsResult = baiduResult.words_result || [];
 
-    // 提取所有文本
-    const fullText = wordsResult.map(item => item.words).join('\n');
+    // 提取所有文本，去掉换行符用空格连接
+    const fullText = wordsResult.map(item => item.words).join(' ').replace(/\s+/g, ' ').trim();
 
     // 计算平均置信度（如果有概率信息）
     let confidence = 0.8; // 默认置信度
@@ -218,10 +218,10 @@ export class BaiduOCRService implements OCRService {
       confidence = baiduResult.probability?.average || baiduResult['probability']?.average || 0.8;
     }
 
-    // 转换为文本块
+    // 转换为文本块，去掉换行符
     const textBlocks: TextBlock[] = wordsResult.map((item, index) => {
       const block: TextBlock = {
-        text: item.words,
+        text: item.words.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim(),
         confidence: confidence,
       };
 
@@ -250,16 +250,48 @@ export class BaiduOCRService implements OCRService {
 
   /**
    * 将File对象转换为base64字符串
+   * 兼容浏览器和Node.js环境
    */
   private async fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve(reader.result as string);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    // 检查是否在浏览器环境
+    if (typeof window !== 'undefined' && typeof FileReader !== 'undefined') {
+      // 浏览器环境：使用FileReader
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          resolve(reader.result as string);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    } else {
+      // Node.js/服务器环境：使用Buffer
+      try {
+        // 首先尝试使用file.arrayBuffer()（现代API）
+        if (file.arrayBuffer && typeof file.arrayBuffer === 'function') {
+          const arrayBuffer = await file.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const base64 = buffer.toString('base64');
+          const mimeType = file.type || 'application/octet-stream';
+          return `data:${mimeType};base64,${base64}`;
+        }
+
+        // 备用方法：如果file有buffer属性
+        if ((file as any).buffer) {
+          const buffer = Buffer.from((file as any).buffer);
+          const base64 = buffer.toString('base64');
+          const mimeType = file.type || 'application/octet-stream';
+          return `data:${mimeType};base64,${base64}`;
+        }
+
+        // 如果都没有，尝试其他方法
+        console.warn('无法将文件转换为base64，使用回退方法');
+        throw new Error('无法处理文件：缺少arrayBuffer方法');
+      } catch (error) {
+        console.error('文件转base64失败:', error);
+        throw new Error(`文件转换失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
+    }
   }
 }
 

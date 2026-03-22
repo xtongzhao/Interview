@@ -2,6 +2,27 @@
 
 import { KnowledgeCategory } from './knowledgeCategories';
 
+// ==================== 招聘官网快捷链接 ====================
+export interface RecruitmentWebsite {
+  id: string;
+  name: string; // 网站名称，如"BOSS直聘"、"拉勾网"
+  url: string; // 网站URL
+  description?: string; // 网站描述
+  category: 'job_board' | 'company_portal' | 'social_media' | 'government' | 'other'; // 网站类型
+  icon?: string; // 图标URL或emoji
+  requiresLogin: boolean; // 是否需要登录
+  popularity: number; // 热度/使用频率，用于排序
+  tags: string[]; // 标签，如["互联网", "外企", "校招"]
+  metadata: {
+    lastVisited?: Date; // 最后访问时间
+    visitCount: number; // 访问次数
+    isFavorite: boolean; // 是否收藏
+    note?: string; // 备注
+  };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // ==================== 面试资源类型 ====================
 export type ResourceType = 'resume' | 'image' | 'text' | 'jd' | 'other';
 export type ResourceStatus = 'pending' | 'processing' | 'processed' | 'error';
@@ -87,7 +108,11 @@ export interface JobApplication {
     jobId?: string; // 公司内部的职位ID
     salaryExpectation?: string;
     isRemote?: boolean;
+    careerPortalUrl?: string; // 公司招聘官网链接
   };
+
+  // 关联的招聘网站
+  recruitmentWebsiteId?: string;
 }
 
 export interface ApplicationMilestone {
@@ -177,6 +202,7 @@ export class InterviewStorage {
     RESOURCES: 'interview_resources_v1',
     APPLICATIONS: 'job_applications_v1',
     REVIEWS: 'interview_reviews_v1',
+    RECRUITMENT_WEBSITES: 'recruitment_websites_v1',
   };
 
   private constructor() {}
@@ -431,6 +457,111 @@ export class InterviewStorage {
       app.tags.some(tag => tag.toLowerCase().includes(lowerQuery))
     );
   }
+
+  // ========== 招聘官网管理 ==========
+  async saveWebsite(website: RecruitmentWebsite): Promise<RecruitmentWebsite> {
+    const websites = await this.getAllWebsites();
+    const updatedWebsite = {
+      ...website,
+      updatedAt: new Date(),
+    };
+
+    const index = websites.findIndex(w => w.id === website.id);
+    if (index >= 0) {
+      websites[index] = updatedWebsite;
+    } else {
+      websites.push(updatedWebsite);
+    }
+
+    localStorage.setItem(InterviewStorage.STORAGE_KEYS.RECRUITMENT_WEBSITES, JSON.stringify(websites));
+    return updatedWebsite;
+  }
+
+  async deleteWebsite(websiteId: string): Promise<boolean> {
+    const websites = await this.getAllWebsites();
+    const filtered = websites.filter(w => w.id !== websiteId);
+
+    if (filtered.length !== websites.length) {
+      localStorage.setItem(InterviewStorage.STORAGE_KEYS.RECRUITMENT_WEBSITES, JSON.stringify(filtered));
+      return true;
+    }
+    return false;
+  }
+
+  async getWebsite(websiteId: string): Promise<RecruitmentWebsite | null> {
+    const websites = await this.getAllWebsites();
+    return websites.find(w => w.id === websiteId) || null;
+  }
+
+  async getAllWebsites(): Promise<RecruitmentWebsite[]> {
+    try {
+      const saved = localStorage.getItem(InterviewStorage.STORAGE_KEYS.RECRUITMENT_WEBSITES);
+      if (!saved) return [];
+
+      const data = JSON.parse(saved);
+      return data.map((item: any) => ({
+        ...item,
+        createdAt: new Date(item.createdAt),
+        updatedAt: new Date(item.updatedAt),
+        metadata: {
+          ...item.metadata,
+          lastVisited: item.metadata?.lastVisited ? new Date(item.metadata.lastVisited) : undefined,
+          visitCount: item.metadata?.visitCount || 0,
+          isFavorite: item.metadata?.isFavorite || false,
+        },
+      }));
+    } catch (error) {
+      console.warn('Error loading recruitment websites from localStorage:', error);
+      return [];
+    }
+  }
+
+  async getWebsitesByCategory(category: RecruitmentWebsite['category']): Promise<RecruitmentWebsite[]> {
+    const websites = await this.getAllWebsites();
+    return websites.filter(w => w.category === category);
+  }
+
+  async searchWebsites(query: string): Promise<RecruitmentWebsite[]> {
+    const websites = await this.getAllWebsites();
+    const lowerQuery = query.toLowerCase();
+
+    return websites.filter(website =>
+      website.name.toLowerCase().includes(lowerQuery) ||
+      website.description?.toLowerCase().includes(lowerQuery) ||
+      website.tags.some(tag => tag.toLowerCase().includes(lowerQuery))
+    );
+  }
+
+  async incrementWebsiteVisitCount(websiteId: string): Promise<void> {
+    const website = await this.getWebsite(websiteId);
+    if (website) {
+      const updatedWebsite: RecruitmentWebsite = {
+        ...website,
+        metadata: {
+          ...website.metadata,
+          lastVisited: new Date(),
+          visitCount: (website.metadata.visitCount || 0) + 1,
+        },
+        updatedAt: new Date(),
+      };
+      await this.saveWebsite(updatedWebsite);
+    }
+  }
+
+  async getPopularWebsites(limit: number = 10): Promise<RecruitmentWebsite[]> {
+    const websites = await this.getAllWebsites();
+    return websites
+      .sort((a, b) => {
+        // 先按是否收藏排序
+        if (a.metadata.isFavorite && !b.metadata.isFavorite) return -1;
+        if (!a.metadata.isFavorite && b.metadata.isFavorite) return 1;
+        // 再按访问次数排序
+        const aVisits = a.metadata.visitCount || 0;
+        const bVisits = b.metadata.visitCount || 0;
+        return bVisits - aVisits;
+      })
+      .slice(0, limit);
+  }
 }
 
 // ==================== 辅助函数 ====================
@@ -526,4 +657,75 @@ export function createNewReview(
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+}
+
+export function createNewWebsite(
+  name: string,
+  url: string,
+  category: RecruitmentWebsite['category'] = 'job_board',
+  description?: string
+): RecruitmentWebsite {
+  const id = generateId('website');
+
+  return {
+    id,
+    name,
+    url,
+    description,
+    category,
+    requiresLogin: true, // 大多数招聘网站需要登录
+    popularity: 0,
+    tags: [],
+    metadata: {
+      visitCount: 0,
+      isFavorite: false,
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+export async function initializeDefaultRecruitmentWebsites(storage: InterviewStorage): Promise<void> {
+  const existingWebsites = await storage.getAllWebsites();
+  if (existingWebsites.length > 0) {
+    return; // 已有数据，不重复初始化
+  }
+
+  const defaultWebsites: RecruitmentWebsite[] = [
+    createNewWebsite('BOSS直聘', 'https://www.zhipin.com', 'job_board', '国内领先的互联网招聘平台，专注互联网行业'),
+    createNewWebsite('拉勾网', 'https://www.lagou.com', 'job_board', '专注互联网职业机会的招聘网站'),
+    createNewWebsite('猎聘', 'https://www.liepin.com', 'job_board', '高端人才招聘平台'),
+    createNewWebsite('智联招聘', 'https://www.zhaopin.com', 'job_board', '综合性招聘网站'),
+    createNewWebsite('前程无忧', 'https://www.51job.com', 'job_board', '国内领先的综合性招聘网站'),
+    createNewWebsite('脉脉', 'https://maimai.cn', 'social_media', '职场社交平台，有招聘功能'),
+    createNewWebsite('LinkedIn领英', 'https://www.linkedin.com', 'social_media', '全球职场社交平台'),
+    createNewWebsite('实习僧', 'https://www.shixiseng.com', 'job_board', '专注实习和校招的招聘平台'),
+    createNewWebsite('牛客网', 'https://www.nowcoder.com', 'job_board', '程序员笔试面试平台，有招聘功能'),
+    createNewWebsite('阿里招聘官网', 'https://talent.alibaba.com', 'company_portal', '阿里巴巴集团官方招聘网站'),
+    createNewWebsite('腾讯招聘官网', 'https://careers.tencent.com', 'company_portal', '腾讯官方招聘网站'),
+    createNewWebsite('字节跳动招聘官网', 'https://jobs.bytedance.com', 'company_portal', '字节跳动官方招聘网站'),
+    createNewWebsite('华为招聘官网', 'https://career.huawei.com', 'company_portal', '华为官方招聘网站'),
+    createNewWebsite('百度招聘官网', 'https://talent.baidu.com', 'company_portal', '百度官方招聘网站'),
+    createNewWebsite('美团招聘官网', 'https://zhaopin.meituan.com', 'company_portal', '美团官方招聘网站'),
+    createNewWebsite('国家公务员局', 'http://www.scs.gov.cn', 'government', '国家公务员考试报名网站'),
+  ];
+
+  // 为部分网站设置特殊属性
+  defaultWebsites[0].tags = ['互联网', '科技', '热门'];
+  defaultWebsites[0].metadata.isFavorite = true;
+  defaultWebsites[0].popularity = 100;
+
+  defaultWebsites[1].tags = ['互联网', '科技'];
+  defaultWebsites[1].popularity = 90;
+
+  defaultWebsites[2].tags = ['高端', '外企', '管理'];
+  defaultWebsites[2].popularity = 85;
+
+  defaultWebsites[9].tags = ['大厂', '互联网', '电商'];
+  defaultWebsites[9].metadata.isFavorite = true;
+
+  // 批量保存
+  for (const website of defaultWebsites) {
+    await storage.saveWebsite(website);
+  }
 }

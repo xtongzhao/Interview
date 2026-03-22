@@ -1,0 +1,14 @@
+
+> ai-interview-simulator@0.1.0 dev
+> next dev
+
+▲ Next.js 16.1.7 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.20.10.6:3000
+- Environments: .env.local
+
+✓ Starting...
+✓ Ready in 764ms
+ GET / 200 in 2.3s (compile: 2.0s, render: 231ms)
+ GET /api/ocr 200 in 178ms (compile: 168ms, render: 9ms)
+[?25h

@@ -18,6 +18,8 @@ import {
   createNewResource,
   createNewApplication,
   createNewReview,
+  RecruitmentWebsite,
+  initializeDefaultRecruitmentWebsites,
 } from '@/lib/interviewModels';
 import { resourceProcessor, ProcessResult } from '@/lib/resourceProcessor';
 
@@ -28,11 +30,13 @@ export function useInterviewData() {
   const [resources, setResources] = useState<InterviewResource[]>([]);
   const [applications, setApplications] = useState<JobApplication[]>([]);
   const [reviews, setReviews] = useState<InterviewReview[]>([]);
+  const [websites, setWebsites] = useState<RecruitmentWebsite[]>([]);
 
   const [isLoading, setIsLoading] = useState({
     resources: true,
     applications: true,
     reviews: true,
+    websites: true,
   });
 
   const [processingResource, setProcessingResource] = useState<string | null>(null);
@@ -44,21 +48,26 @@ export function useInterviewData() {
 
   const loadAllData = async () => {
     try {
-      setIsLoading({ resources: true, applications: true, reviews: true });
+      setIsLoading({ resources: true, applications: true, reviews: true, websites: true });
 
-      const [loadedResources, loadedApplications, loadedReviews] = await Promise.all([
+      // 先初始化默认招聘网站数据
+      await initializeDefaultRecruitmentWebsites(storage);
+
+      const [loadedResources, loadedApplications, loadedReviews, loadedWebsites] = await Promise.all([
         storage.getAllResources(),
         storage.getAllApplications(),
         storage.getAllReviews(),
+        storage.getAllWebsites(),
       ]);
 
       setResources(loadedResources);
       setApplications(loadedApplications);
       setReviews(loadedReviews);
+      setWebsites(loadedWebsites);
     } catch (error) {
       console.error('Error loading interview data:', error);
     } finally {
-      setIsLoading({ resources: false, applications: false, reviews: false });
+      setIsLoading({ resources: false, applications: false, reviews: false, websites: false });
     }
   };
 
@@ -291,19 +300,102 @@ export function useInterviewData() {
     resources: InterviewResource[];
     applications: JobApplication[];
     reviews: InterviewReview[];
+    websites: RecruitmentWebsite[];
   }> => {
     return {
       resources,
       applications,
       reviews,
+      websites,
     };
-  }, [resources, applications, reviews]);
+  }, [resources, applications, reviews, websites]);
+
+  // ========== 招聘官网管理 ==========
+  const addWebsite = useCallback(async (
+    name: string,
+    url: string,
+    category: RecruitmentWebsite['category'] = 'job_board',
+    description?: string
+  ): Promise<RecruitmentWebsite> => {
+    const newWebsite: RecruitmentWebsite = {
+      id: generateId('website'),
+      name,
+      url,
+      description,
+      category,
+      requiresLogin: true,
+      popularity: 0,
+      tags: [],
+      metadata: {
+        visitCount: 0,
+        isFavorite: false,
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const savedWebsite = await storage.saveWebsite(newWebsite);
+    setWebsites(prev => [...prev, savedWebsite]);
+    return savedWebsite;
+  }, [storage]);
+
+  const updateWebsite = useCallback(async (website: RecruitmentWebsite): Promise<void> => {
+    const updated = await storage.saveWebsite(website);
+    setWebsites(prev => prev.map(w => w.id === updated.id ? updated : w));
+  }, [storage]);
+
+  const deleteWebsite = useCallback(async (websiteId: string): Promise<boolean> => {
+    const success = await storage.deleteWebsite(websiteId);
+    if (success) {
+      setWebsites(prev => prev.filter(w => w.id !== websiteId));
+    }
+    return success;
+  }, [storage]);
+
+  const getWebsite = useCallback((websiteId: string): RecruitmentWebsite | undefined => {
+    return websites.find(w => w.id === websiteId);
+  }, [websites]);
+
+  const getWebsitesByCategory = useCallback((category: RecruitmentWebsite['category']): RecruitmentWebsite[] => {
+    return websites.filter(w => w.category === category);
+  }, [websites]);
+
+  const searchWebsites = useCallback(async (query: string): Promise<RecruitmentWebsite[]> => {
+    return storage.searchWebsites(query);
+  }, [storage]);
+
+  const incrementWebsiteVisitCount = useCallback(async (websiteId: string): Promise<void> => {
+    await storage.incrementWebsiteVisitCount(websiteId);
+    // 刷新数据
+    const updatedWebsites = await storage.getAllWebsites();
+    setWebsites(updatedWebsites);
+  }, [storage]);
+
+  const getPopularWebsites = useCallback(async (limit: number = 10): Promise<RecruitmentWebsite[]> => {
+    return storage.getPopularWebsites(limit);
+  }, [storage]);
+
+  const toggleWebsiteFavorite = useCallback(async (websiteId: string): Promise<void> => {
+    const website = getWebsite(websiteId);
+    if (website) {
+      const updatedWebsite: RecruitmentWebsite = {
+        ...website,
+        metadata: {
+          ...website.metadata,
+          isFavorite: !website.metadata.isFavorite,
+        },
+        updatedAt: new Date(),
+      };
+      await updateWebsite(updatedWebsite);
+    }
+  }, [getWebsite, updateWebsite]);
 
   return {
     // 状态
     resources,
     applications,
     reviews,
+    websites,
     isLoading,
     processingResource,
 
@@ -338,6 +430,17 @@ export function useInterviewData() {
     // 批量操作
     importResourcesFromFiles,
     exportData,
+
+    // 招聘官网管理
+    addWebsite,
+    updateWebsite,
+    deleteWebsite,
+    getWebsite,
+    getWebsitesByCategory,
+    searchWebsites,
+    incrementWebsiteVisitCount,
+    getPopularWebsites,
+    toggleWebsiteFavorite,
 
     // 数据重载
     reloadData: loadAllData,

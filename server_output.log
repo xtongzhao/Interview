@@ -1,0 +1,18 @@
+
+> ai-interview-simulator@0.1.0 dev
+> next dev
+
+▲ Next.js 16.1.7 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.20.10.6:3000
+- Environments: .env.local
+
+✓ Starting...
+✓ Ready in 805ms
+ GET /api/ocr 200 in 159ms (compile: 142ms, render: 16ms)
+ GET / 200 in 770ms (compile: 279ms, render: 491ms)
+ GET /questions 200 in 427ms (compile: 417ms, render: 10ms)
+ GET /generate 200 in 878ms (compile: 869ms, render: 9ms)
+ GET /api/ocr 200 in 65ms (compile: 40ms, render: 25ms)
+ GET /generate 200 in 27ms (compile: 10ms, render: 17ms)
+[?25h

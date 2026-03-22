@@ -189,16 +189,70 @@ export class SimpleVectorStore {
     return deleted;
   }
 
+  // 更新内容
+  async updateContent(chunkId: string, updates: Partial<SimpleChunk>): Promise<boolean> {
+    let found = false;
+
+    // 遍历所有分类查找对应的块
+    for (const [category, collection] of this.collections.entries()) {
+      const chunkIndex = collection.findIndex(chunk => chunk.id === chunkId);
+      if (chunkIndex !== -1) {
+        // 如果更新了文本，可能需要重新分类
+        const oldChunk = collection[chunkIndex];
+        const newChunk = { ...oldChunk, ...updates };
+
+        // 如果文本已更改，检查是否需要重新分类
+        if (updates.text && updates.text !== oldChunk.text) {
+          const newCategory = classifyByKeywords(updates.text);
+          if (newCategory !== category) {
+            // 移动到新分类
+            this.collections.set(
+              category,
+              collection.filter(chunk => chunk.id !== chunkId)
+            );
+            const newCollection = this.collections.get(newCategory) || [];
+            newCollection.push(newChunk);
+            this.collections.set(newCategory, newCollection);
+          } else {
+            // 同一分类内更新
+            collection[chunkIndex] = newChunk;
+          }
+        } else {
+          // 仅更新其他字段
+          collection[chunkIndex] = newChunk;
+        }
+
+        found = true;
+        break;
+      }
+    }
+
+    if (found) {
+      this.saveToLocalStorage();
+      console.log(`Updated chunk ${chunkId}`);
+    }
+
+    return found;
+  }
+
   // 清除所有数据
   async clearAll(): Promise<void> {
     this.collections.clear();
     this.initializeCollections();
-    localStorage.removeItem('simple_vector_store');
+    // 防止在服务器端访问 localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('simple_vector_store');
+    }
     console.log('Cleared all vector store data');
   }
 
   // 本地存储相关方法
   private saveToLocalStorage() {
+    // 防止在服务器端访问 localStorage
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     try {
       const data: Record<string, SimpleChunk[]> = {};
       for (const [category, collection] of this.collections.entries()) {
@@ -211,6 +265,11 @@ export class SimpleVectorStore {
   }
 
   private loadFromLocalStorage() {
+    // 防止在服务器端访问 localStorage
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     try {
       const saved = localStorage.getItem('simple_vector_store');
       if (!saved) return;

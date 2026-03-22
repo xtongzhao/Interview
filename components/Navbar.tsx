@@ -17,11 +17,11 @@ const Navbar = () => {
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        <div className="flex items-center gap-2">
-          <Link href="/" className="text-xl font-bold">
+        <div className="flex items-baseline gap-2 whitespace-nowrap">
+          <Link href="/" className="text-xl font-bold leading-tight">
             面试知识库
           </Link>
-          <span className="hidden text-sm text-muted-foreground md:inline">
+          <span className="hidden text-sm text-muted-foreground leading-tight md:inline">
             个人知识库（面试版）
           </span>
         </div>

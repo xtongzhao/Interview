@@ -26,6 +26,8 @@ const GenerateQuestionsSchema = z.object({
     category: z.string(),
     source: z.string().optional(),
   })).optional(),
+  prompt: z.string().optional(), // 系统提示词
+  jobDescription: z.string().optional(), // 岗位JD描述
 });
 
 export async function POST(request: NextRequest) {
@@ -37,12 +39,14 @@ export async function POST(request: NextRequest) {
     const prompt = constructPrompt(validatedData);
 
     // Call OpenAI API
+    const systemMessage = validatedData.prompt || "You are an expert interview coach specializing in AI product management and technical roles. Generate relevant interview questions based on the user's background and preferences.";
+
     const completion = await openai.chat.completions.create({
       model: "deepseek-chat",
       messages: [
         {
           role: "system",
-          content: "You are an expert interview coach specializing in AI product management and technical roles. Generate relevant interview questions based on the user's background and preferences."
+          content: systemMessage
         },
         {
           role: "user",
@@ -87,9 +91,19 @@ export async function POST(request: NextRequest) {
 }
 
 function constructPrompt(data: z.infer<typeof GenerateQuestionsSchema>): string {
-  const { resumeText, importedQuestions, questionTypes, position, industry, contextChunks } = data;
+  const { resumeText, importedQuestions, questionTypes, position, industry, contextChunks, prompt: userPrompt, jobDescription } = data;
 
-  let prompt = `Generate interview questions with the following distribution:\n`;
+  let prompt = `Generate interview questions for a candidate based on the following information:\n\n`;
+
+  // 岗位JD是最重要的上下文
+  if (jobDescription && jobDescription.trim()) {
+    prompt += `=== JOB DESCRIPTION ===\n`;
+    prompt += `${jobDescription}\n\n`;
+    prompt += `Please generate questions that are specifically tailored to this job description. Focus on the required skills, responsibilities, and qualifications mentioned above.\n\n`;
+  }
+
+  // 问题类型分布
+  prompt += `=== QUESTION DISTRIBUTION ===\n`;
   prompt += `- General questions: ${questionTypes.general}%\n`;
   prompt += `- Technical questions: ${questionTypes.technical}%\n`;
   prompt += `- Behavioral questions: ${questionTypes.behavioral}%\n\n`;
@@ -101,10 +115,10 @@ function constructPrompt(data: z.infer<typeof GenerateQuestionsSchema>): string 
     prompt += `Industry: ${industry}\n`;
   }
 
-  // 如果有检索到的上下文，优先使用
+  // 如果有检索到的上下文（来自知识库），优先使用
   if (contextChunks && contextChunks.length > 0) {
-    prompt += `\n=== RELEVANT CONTEXT FROM CANDIDATE'S BACKGROUND ===\n`;
-    prompt += `Here are specific details from the candidate's background that should inform your questions:\n\n`;
+    prompt += `\n=== RELEVANT CONTEXT FROM KNOWLEDGE BASE ===\n`;
+    prompt += `Here are specific details from the candidate's knowledge base that should inform your questions:\n\n`;
 
     contextChunks.forEach((chunk, index) => {
       prompt += `[Context ${index + 1} - ${chunk.category}]:\n`;
@@ -112,23 +126,30 @@ function constructPrompt(data: z.infer<typeof GenerateQuestionsSchema>): string 
     });
 
     prompt += `=== END CONTEXT ===\n\n`;
-    prompt += `Please generate questions that specifically reference these details when relevant. `;
+    prompt += `Please generate questions that specifically reference these knowledge base details when relevant. `;
     prompt += `For technical questions, focus on the skills and projects mentioned. `;
     prompt += `For behavioral questions, consider the experiences described.\n\n`;
   } else if (resumeText) {
     // 回退到原始简历文本
-    prompt += `\nHere is the candidate's resume summary:\n${resumeText.substring(0, 2000)}\n\n`;
+    prompt += `\n=== RESUME SUMMARY ===\n${resumeText.substring(0, 2000)}\n\n`;
   }
 
   if (importedQuestions && importedQuestions.length > 0) {
-    prompt += `\nHere are some example questions to use as inspiration:\n`;
+    prompt += `\n=== EXAMPLE QUESTIONS FOR INSPIRATION ===\n`;
     importedQuestions.forEach((q, i) => {
       prompt += `${i + 1}. ${q}\n`;
     });
+    prompt += `\n`;
   }
 
-  prompt += `\nPlease generate a list of interview questions that match the distribution above. `;
-  prompt += `Format the response as a JSON array of objects, where each object has "id", "text", "category" (general/technical/behavioral), and "difficulty" (easy/medium/hard). `;
+  prompt += `=== INSTRUCTIONS ===\n`;
+  prompt += `1. Generate questions that match the distribution above\n`;
+  prompt += `2. Tailor questions to the job description when relevant\n`;
+  prompt += `3. Reference the knowledge base context when appropriate\n`;
+  prompt += `4. Include a mix of difficulty levels (easy, medium, hard)\n`;
+  prompt += `5. Make questions specific and actionable\n\n`;
+
+  prompt += `Format the response as a JSON array of objects, where each object has "id", "text", "category" (general/technical/behavioral/scenario/product/experience), and "difficulty" (easy/medium/hard). `;
   prompt += `Return ONLY the JSON array, no other text.`;
 
   return prompt;

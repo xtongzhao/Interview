@@ -14,24 +14,28 @@ export const CategoryConfig = {
     name: '简历相关',
     description: '个人经历、技能、项目经验',
     color: 'blue',
+    badgeClass: 'bg-blue-100 text-blue-700',
     icon: '📄',
   },
   [KnowledgeCategory.SCENARIO]: {
     name: '情景模拟',
     description: '案例分析、行为面试题',
     color: 'green',
+    badgeClass: 'bg-green-100 text-green-700',
     icon: '🎭',
   },
   [KnowledgeCategory.LLM_KNOWLEDGE]: {
     name: '大模型知识',
     description: 'AI技术、原理、最新进展',
     color: 'purple',
+    badgeClass: 'bg-purple-100 text-purple-700',
     icon: '🧠',
   },
   [KnowledgeCategory.CREATIVE_THINKING]: {
     name: '思维发散',
     description: '创新问题、开放思考',
     color: 'orange',
+    badgeClass: 'bg-orange-100 text-orange-700',
     icon: '💡',
   },
 } as const;
