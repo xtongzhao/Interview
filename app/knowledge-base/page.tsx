@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+
+export const dynamic = 'force-dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +37,7 @@ import { useInterviewData, ResourceType, InterviewResource } from "@/hooks/useIn
 import { KnowledgeCategory, CategoryConfig } from "@/lib/knowledgeCategories";
 import { resourceProcessor } from "@/lib/resourceProcessor";
 
-export default function KnowledgeBasePage() {
+function KnowledgeBasePageContent() {
   const searchParams = useSearchParams();
 
   // 根据URL参数设置初始活动标签页
@@ -840,5 +842,25 @@ export default function KnowledgeBasePage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function KnowledgeBasePage() {
+  return (
+    <Suspense fallback={
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold">面试资源知识库</h1>
+          <p className="text-muted-foreground">
+            统一管理您的面试资源和知识库内容，所有资源将被解析并存入知识库，用于智能面试准备。
+          </p>
+        </div>
+        <div className="text-center py-12">
+          <p>加载中...</p>
+        </div>
+      </div>
+    }>
+      <KnowledgeBasePageContent />
+    </Suspense>
   );
 }
