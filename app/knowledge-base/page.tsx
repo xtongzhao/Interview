@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
 
-export const dynamic = 'force-dynamic';
+// 注意：在客户端组件中，页面配置可能被忽略
+// 我们通过避免使用 useSearchParams 来防止预渲染错误
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,10 +38,8 @@ import { KnowledgeCategory, CategoryConfig } from "@/lib/knowledgeCategories";
 import { resourceProcessor } from "@/lib/resourceProcessor";
 
 function KnowledgeBasePageContent() {
-  const searchParams = useSearchParams();
-
-  // 根据URL参数设置初始活动标签页
-  const initialTab = searchParams.get('tab') === 'questions' ? 'questions' : 'resources';
+  // 使用 useState 和 useEffect 替代 useSearchParams 以避免预渲染错误
+  const [activeTab, setActiveTab] = useState<'resources' | 'knowledge'>('resources');
 
   // 资源管理相关状态和函数
   const {
@@ -54,19 +52,22 @@ function KnowledgeBasePageContent() {
     processingResource,
   } = useInterviewData();
 
-
-  const [activeTab, setActiveTab] = useState<'resources' | 'knowledge'>(initialTab as any);
-
   // 当URL参数变化时更新活动标签页
   useEffect(() => {
+    // 仅在客户端执行
+    if (typeof window === 'undefined') return;
+
+    const searchParams = new URLSearchParams(window.location.search);
     const tabParam = searchParams.get('tab');
+
     if (tabParam === 'knowledge' || tabParam === 'resources') {
       setActiveTab(tabParam as any);
     } else if (tabParam === 'questions') {
       // 向后兼容：旧questions参数重定向到knowledge
       setActiveTab('knowledge');
     }
-  }, [searchParams]);
+    // 如果没有tab参数，使用默认值 'resources'，已经是默认值
+  }, []); // 空依赖数组，仅在组件挂载时执行一次
 
   const [resourceTypeFilter, setResourceTypeFilter] = useState<ResourceType | 'all'>('all');
   const [searchResourceText, setSearchResourceText] = useState('');
